@@ -10,8 +10,9 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatType, ParseMode
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyParameters
 
+from bot.bridge_store import BridgeStore
 from bot.chat_store import ChatStore, ChatTrackingMiddleware
 from bot.config import Config, ROOT_DIR, load_config
 from bot.console_server import start_console_server
@@ -52,6 +53,17 @@ def format_user_record(user: dict, index: int) -> str:
     label = f"@{username}" if username else full_name or "no name"
     count = int(user.get("message_count") or 0)
     return f"{index}. {label} | id: <code>{user.get('id')}</code> | messages: {count}"
+
+
+def user_label(message: Message) -> str:
+    user = message.from_user
+    if user is None:
+        return "unknown user"
+
+    if user.username:
+        return f"@{user.username}"
+
+    return user.full_name or str(user.id)
 
 
 async def set_commands(bot: Bot, config: Config) -> None:
@@ -167,6 +179,76 @@ async def copy_to_target(message: Message, bot: Bot, target_store: TargetStore) 
         )
 
 
+async def reply_to_bridge_target(message: Message, bot: Bot, bridge_store: BridgeStore) -> bool:
+    reply = message.reply_to_message
+    if reply is None:
+        return False
+
+    record = bridge_store.get(message.chat.id, reply.message_id)
+    if record is None:
+        return False
+
+    try:
+        sent = await bot.copy_message(
+            chat_id=record["target_chat_id"],
+            from_chat_id=message.chat.id,
+            message_id=message.message_id,
+            reply_parameters=ReplyParameters(
+                message_id=record["target_message_id"],
+                chat_id=record["target_chat_id"],
+                allow_sending_without_reply=True,
+            ),
+        )
+        await message.answer(f"replied #{sent.message_id}")
+    except TelegramAPIError as exc:
+        await message.answer(f"could not reply: {exc}")
+
+    return True
+
+
+def is_bot_reply_or_ping(message: Message, bot_username: str, bot_id: int) -> bool:
+    if message.from_user and message.from_user.is_bot:
+        return False
+
+    reply = message.reply_to_message
+    if reply and reply.from_user and reply.from_user.id == bot_id:
+        return True
+
+    text = message.text or message.caption or ""
+    return bool(bot_username and f"@{bot_username.lower()}" in text.lower())
+
+
+async def notify_admins_about_ping(message: Message, bot: Bot, config: Config, bridge_store: BridgeStore) -> None:
+    me = await bot.get_me()
+    if not is_bot_reply_or_ping(message, me.username or "", me.id):
+        return
+
+    sender = user_label(message)
+    preview = message.text or message.caption or message.content_type
+    alert = (
+        "someone replied/pinged the bot\n"
+        f"from: {sender}\n"
+        f"chat: {chat_label(message)}\n"
+        f"message id: {message.message_id}\n\n"
+        f"{preview}\n\n"
+        "reply to this alert to answer them."
+    )
+
+    for admin_id in config.admin_ids:
+        try:
+            alert_message = await bot.send_message(admin_id, alert)
+            bridge_store.set(admin_id, alert_message.message_id, message.chat.id, message.message_id)
+
+            copied = await bot.copy_message(
+                chat_id=admin_id,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id,
+            )
+            bridge_store.set(admin_id, copied.message_id, message.chat.id, message.message_id)
+        except TelegramAPIError as exc:
+            logging.warning("Could not notify admin %s about ping: %s", admin_id, exc)
+
+
 @router.message(CommandStart())
 async def start(message: Message, config: Config, reply_store: ReplyStore) -> None:
     if is_admin(message, config):
@@ -248,11 +330,16 @@ async def handle_message(
     config: Config,
     target_store: TargetStore,
     reply_store: ReplyStore,
+    bridge_store: BridgeStore,
 ) -> None:
     if message.chat.type != ChatType.PRIVATE:
+        await notify_admins_about_ping(message, bot, config, bridge_store)
         return
 
     if is_admin(message, config):
+        if await reply_to_bridge_target(message, bot, bridge_store):
+            return
+
         if await maybe_set_target(message, target_store):
             return
 
@@ -274,6 +361,7 @@ async def run(config: Config) -> None:
     user_store = UserStore(ROOT_DIR / "data" / "bot-users.json")
     target_store = TargetStore(ROOT_DIR / "data" / "target-chat.json", fallback_chat_id=config.default_chat_id)
     reply_store = ReplyStore(ROOT_DIR / "bot" / "ragebaits.json")
+    bridge_store = BridgeStore(ROOT_DIR / "data" / "reply-bridge.json")
     console_runner = None
 
     dispatcher.message.middleware(ChatTrackingMiddleware(chat_store))
@@ -296,6 +384,7 @@ async def run(config: Config) -> None:
             target_store=target_store,
             reply_store=reply_store,
             user_store=user_store,
+            bridge_store=bridge_store,
         )
     finally:
         if console_runner:
