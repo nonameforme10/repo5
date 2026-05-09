@@ -10,18 +10,25 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatType, ParseMode
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BotCommandScopeChat, Message
+from aiogram.types import BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.chat_store import ChatStore, ChatTrackingMiddleware
 from bot.config import Config, ROOT_DIR, load_config
 from bot.console_server import start_console_server
 from bot.reply_store import ReplyStore
 from bot.target_store import TargetStore
+from bot.user_store import UserStore, UserTrackingMiddleware
 
 
 router = Router(name="control")
 
 
+ADMIN_COMMANDS = [
+    BotCommand(command="menu", description="Open admin menu"),
+    BotCommand(command="console", description="Open web console"),
+    BotCommand(command="chatid", description="Show this chat ID"),
+    BotCommand(command="users", description="Show saved users"),
+]
 stranger_counts: dict[int, int] = {}
 
 
@@ -37,13 +44,31 @@ def chat_label(message: Message) -> str:
     return message.chat.title or message.chat.full_name or message.chat.username or str(message.chat.id)
 
 
+def format_user_record(user: dict, index: int) -> str:
+    username = str(user.get("username") or "")
+    first_name = str(user.get("first_name") or "")
+    last_name = str(user.get("last_name") or "")
+    full_name = " ".join(part for part in (first_name, last_name) if part).strip()
+    label = f"@{username}" if username else full_name or "no name"
+    count = int(user.get("message_count") or 0)
+    return f"{index}. {label} | id: <code>{user.get('id')}</code> | messages: {count}"
+
+
 async def set_commands(bot: Bot, config: Config) -> None:
     await bot.delete_my_commands()
     for admin_id in config.admin_ids:
         try:
-            await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=admin_id))
+            await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=admin_id))
         except TelegramAPIError as exc:
-            logging.warning("Could not clear private admin commands for %s: %s", admin_id, exc)
+            logging.warning("Could not set private admin commands for %s: %s", admin_id, exc)
+
+
+def console_keyboard(config: Config) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Open console", url=config.console_url)],
+        ]
+    )
 
 
 def normalize_chat_id(value: str) -> int | str | None:
@@ -145,10 +170,58 @@ async def copy_to_target(message: Message, bot: Bot, target_store: TargetStore) 
 @router.message(CommandStart())
 async def start(message: Message, config: Config, reply_store: ReplyStore) -> None:
     if is_admin(message, config):
-        await message.answer("admin mode. send anything here and i will post it to the target chat.")
+        await message.answer(
+            "admin mode. send anything here and i will post it to the target chat.",
+            reply_markup=console_keyboard(config),
+        )
         return
 
     await send_stranger_reply(message, reply_store)
+
+
+@router.message(Command("menu"))
+async def menu(message: Message, config: Config, reply_store: ReplyStore) -> None:
+    if not is_admin(message, config):
+        await send_stranger_reply(message, reply_store)
+        return
+
+    await message.answer(
+        "admin menu",
+        reply_markup=console_keyboard(config),
+    )
+
+
+@router.message(Command("console"))
+async def console(message: Message, config: Config, reply_store: ReplyStore) -> None:
+    if not is_admin(message, config):
+        await send_stranger_reply(message, reply_store)
+        return
+
+    await message.answer(
+        f"console: {config.console_url}",
+        reply_markup=console_keyboard(config),
+    )
+
+
+@router.message(Command("users"))
+async def users(message: Message, config: Config, reply_store: ReplyStore, user_store: UserStore) -> None:
+    if not is_admin(message, config):
+        await send_stranger_reply(message, reply_store)
+        return
+
+    saved_users = user_store.all()
+    if not saved_users:
+        await message.answer("no users saved yet")
+        return
+
+    lines = [f"saved users: {len(saved_users)}"]
+    for index, user in enumerate(saved_users[:40], start=1):
+        lines.append(format_user_record(user, index))
+
+    if len(saved_users) > 40:
+        lines.append(f"...and {len(saved_users) - 40} more")
+
+    await message.answer("\n".join(lines))
 
 
 @router.message(Command("chatid"))
@@ -198,13 +271,16 @@ async def run(config: Config) -> None:
     )
     dispatcher = Dispatcher()
     chat_store = ChatStore(ROOT_DIR / "data" / "bot-chats.json")
+    user_store = UserStore(ROOT_DIR / "data" / "bot-users.json")
     target_store = TargetStore(ROOT_DIR / "data" / "target-chat.json", fallback_chat_id=config.default_chat_id)
     reply_store = ReplyStore(ROOT_DIR / "bot" / "ragebaits.json")
     console_runner = None
 
     dispatcher.message.middleware(ChatTrackingMiddleware(chat_store))
+    dispatcher.message.middleware(UserTrackingMiddleware(user_store))
     dispatcher.channel_post.middleware(ChatTrackingMiddleware(chat_store))
     dispatcher.callback_query.middleware(ChatTrackingMiddleware(chat_store))
+    dispatcher.callback_query.middleware(UserTrackingMiddleware(user_store))
     dispatcher.include_router(router)
 
     try:
@@ -219,6 +295,7 @@ async def run(config: Config) -> None:
             config=config,
             target_store=target_store,
             reply_store=reply_store,
+            user_store=user_store,
         )
     finally:
         if console_runner:
