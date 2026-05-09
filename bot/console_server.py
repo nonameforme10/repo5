@@ -226,6 +226,10 @@ async def send(request: web.Request) -> web.Response:
         return json_error(str(exc), status=502)
 
 
+async def options(_: web.Request) -> web.Response:
+    return web.Response(status=204)
+
+
 def create_console_app(bot: Bot, config: Config, chat_store: ChatStore) -> web.Application:
     app = web.Application(
         client_max_size=max(1, config.max_upload_mb) * 1024**2,
@@ -239,7 +243,7 @@ def create_console_app(bot: Bot, config: Config, chat_store: ChatStore) -> web.A
     app.router.add_get("/api/status", status)
     app.router.add_get("/api/chats", chats)
     app.router.add_post("/api/send", send)
-    app.router.add_options("/api/{tail:.*}", lambda _: web.Response(status=204))
+    app.router.add_options("/api/{tail:.*}", options)
     return app
 
 
