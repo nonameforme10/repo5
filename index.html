@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Control Console</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #08090b;
+            --panel: #111419;
+            --panel-2: #171b22;
+            --line: #29313d;
+            --text: #f4f7fb;
+            --muted: #9aa6b5;
+            --red: #ff3434;
+            --cyan: #2ec4ff;
+            --green: #3bd671;
+            --amber: #ffbe3d;
+            --danger: #ff5c7a;
+            --shadow: rgba(0, 0, 0, 0.32);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        button,
+        input,
+        textarea,
+        select {
+            font: inherit;
+        }
+
+        button {
+            border: 0;
+            cursor: pointer;
+        }
+
+        .shell {
+            display: grid;
+            grid-template-columns: 320px minmax(0, 1fr);
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            border-right: 1px solid var(--line);
+            background: #0b0d11;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .brand h1 {
+            margin: 0;
+            font-size: 19px;
+            letter-spacing: 0;
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: var(--amber);
+            box-shadow: 0 0 0 4px rgba(255, 190, 61, 0.12);
+        }
+
+        .dot.online {
+            background: var(--green);
+            box-shadow: 0 0 0 4px rgba(59, 214, 113, 0.12);
+        }
+
+        .field {
+            display: grid;
+            gap: 7px;
+        }
+
+        label {
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            color: var(--text);
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            outline: none;
+            padding: 11px 12px;
+        }
+
+        textarea {
+            min-height: 150px;
+            resize: vertical;
+            line-height: 1.45;
+        }
+
+        input:focus,
+        textarea:focus,
+        select:focus {
+            border-color: var(--cyan);
+            box-shadow: 0 0 0 3px rgba(46, 196, 255, 0.12);
+        }
+
+        .main {
+            display: grid;
+            grid-template-rows: auto 1fr;
+            min-width: 0;
+        }
+
+        .topbar {
+            border-bottom: 1px solid var(--line);
+            background: #0a0c10;
+            padding: 14px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .topbar strong {
+            font-size: 15px;
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .btn {
+            min-height: 40px;
+            border-radius: 8px;
+            padding: 0 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            color: var(--text);
+            background: var(--panel-2);
+            border: 1px solid var(--line);
+            white-space: nowrap;
+        }
+
+        .btn.primary {
+            background: var(--red);
+            border-color: var(--red);
+            color: white;
+            font-weight: 800;
+        }
+
+        .btn.ghost:hover,
+        .chip:hover {
+            border-color: var(--cyan);
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: minmax(0, 1.12fr) minmax(330px, 0.88fr);
+            gap: 18px;
+            padding: 18px;
+            min-width: 0;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            box-shadow: 0 18px 48px var(--shadow);
+            min-width: 0;
+        }
+
+        .panel header {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .panel header h2 {
+            margin: 0;
+            font-size: 14px;
+            letter-spacing: 0;
+        }
+
+        .panel-body {
+            padding: 16px;
+            display: grid;
+            gap: 14px;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .inline {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .inline input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            padding: 0;
+            accent-color: var(--red);
+        }
+
+        .chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .chip {
+            min-width: 40px;
+            min-height: 36px;
+            border-radius: 8px;
+            color: var(--text);
+            background: #0c1017;
+            border: 1px solid var(--line);
+        }
+
+        .muted {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .chat-list {
+            display: grid;
+            gap: 8px;
+            max-height: 280px;
+            overflow: auto;
+            padding-right: 4px;
+        }
+
+        .chat-item {
+            text-align: left;
+            border: 1px solid var(--line);
+            background: #0c1017;
+            color: var(--text);
+            border-radius: 8px;
+            padding: 10px;
+            display: grid;
+            gap: 3px;
+        }
+
+        .chat-item span {
+            color: var(--muted);
+            font-size: 12px;
+            overflow-wrap: anywhere;
+        }
+
+        .log {
+            display: grid;
+            gap: 8px;
+            max-height: 260px;
+            overflow: auto;
+        }
+
+        .entry {
+            border-left: 3px solid var(--cyan);
+            background: #0c1017;
+            padding: 9px 10px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .entry.error {
+            border-left-color: var(--danger);
+        }
+
+        .entry strong {
+            color: var(--text);
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @media (max-width: 920px) {
+            .shell {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                border-right: 0;
+                border-bottom: 1px solid var(--line);
+            }
+
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 560px) {
+            .topbar,
+            .brand,
+            .grid-2 {
+                align-items: stretch;
+                grid-template-columns: 1fr;
+                flex-direction: column;
+            }
+
+            .toolbar {
+                justify-content: stretch;
+            }
+
+            .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <aside class="sidebar">
+            <div class="brand">
+                <h1>Control Console</h1>
+                <span class="status"><span class="dot" id="statusDot"></span><span id="statusText">Checking</span></span>
+            </div>
+
+            <div class="field">
+                <label for="consoleKey">Console key</label>
+                <input id="consoleKey" type="password" autocomplete="current-password" placeholder="Optional">
+            </div>
+
+            <div class="field">
+                <label for="apiBase">API server</label>
+                <input id="apiBase" type="url" placeholder="https://your-vps-domain.com">
+            </div>
+
+            <div class="field">
+                <label for="chatId">Chat or channel</label>
+                <input id="chatId" list="chatOptions" placeholder="-1001234567890 or @channel">
+                <datalist id="chatOptions"></datalist>
+            </div>
+
+            <button class="btn ghost" id="refreshBtn" type="button">Refresh chats</button>
+
+            <section class="panel">
+                <header>
+                    <h2>Known chats</h2>
+                    <span class="muted" id="chatCount">0</span>
+                </header>
+                <div class="panel-body">
+                    <div class="chat-list" id="chatList"></div>
+                </div>
+            </section>
+        </aside>
+
+        <main class="main">
+            <div class="topbar">
+                <strong id="botName">Telegram bot</strong>
+                <div class="toolbar">
+                    <button class="btn ghost" data-template="Assalomu alaykum">Salom</button>
+                    <button class="btn ghost" data-template="Iltimos, hurmat bilan gaplashamiz.">Respect</button>
+                    <button class="btn ghost" data-template="Mana link: ">Link</button>
+                </div>
+            </div>
+
+            <div class="content">
+                <section class="panel">
+                    <header>
+                        <h2>Message</h2>
+                        <button class="btn primary" id="sendTextBtn" type="button">Send text</button>
+                    </header>
+                    <div class="panel-body">
+                        <div class="field">
+                            <label for="messageText">Text</label>
+                            <textarea id="messageText" placeholder="Write anything here..."></textarea>
+                        </div>
+
+                        <div class="grid-2">
+                            <div class="field">
+                                <label for="linkText">Link</label>
+                                <input id="linkText" type="url" placeholder="https://example.com">
+                            </div>
+                            <label class="inline">
+                                <input id="disablePreview" type="checkbox">
+                                <span>Hide link preview</span>
+                            </label>
+                        </div>
+
+                        <div class="chips" aria-label="Emoji">
+                            <button class="chip" data-emoji="😂" type="button">😂</button>
+                            <button class="chip" data-emoji="❤️" type="button">❤️</button>
+                            <button class="chip" data-emoji="🔥" type="button">🔥</button>
+                            <button class="chip" data-emoji="👍" type="button">👍</button>
+                            <button class="chip" data-emoji="👎" type="button">👎</button>
+                            <button class="chip" data-emoji="🎉" type="button">🎉</button>
+                            <button class="chip" data-emoji="😎" type="button">😎</button>
+                            <button class="chip" data-emoji="💀" type="button">💀</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <header>
+                        <h2>Media</h2>
+                        <button class="btn primary" id="sendMediaBtn" type="button">Send media</button>
+                    </header>
+                    <div class="panel-body">
+                        <div class="grid-2">
+                            <div class="field">
+                                <label for="mediaType">Type</label>
+                                <select id="mediaType">
+                                    <option value="photo">Photo</option>
+                                    <option value="animation">GIF</option>
+                                    <option value="video">Video</option>
+                                    <option value="document">File</option>
+                                    <option value="audio">Audio</option>
+                                    <option value="voice">Voice</option>
+                                    <option value="sticker">Sticker</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label for="mediaUrl">Direct URL</label>
+                                <input id="mediaUrl" type="url" placeholder="https://...">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="mediaFile">Upload file</label>
+                            <input id="mediaFile" type="file">
+                        </div>
+
+                        <div class="field" id="captionWrap">
+                            <label for="captionText">Caption</label>
+                            <textarea id="captionText" placeholder="Optional caption"></textarea>
+                        </div>
+
+                        <section>
+                            <div class="log" id="log"></div>
+                        </section>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const els = {
+            statusDot: document.querySelector("#statusDot"),
+            statusText: document.querySelector("#statusText"),
+            botName: document.querySelector("#botName"),
+            consoleKey: document.querySelector("#consoleKey"),
+            apiBase: document.querySelector("#apiBase"),
+            chatId: document.querySelector("#chatId"),
+            chatOptions: document.querySelector("#chatOptions"),
+            chatList: document.querySelector("#chatList"),
+            chatCount: document.querySelector("#chatCount"),
+            refreshBtn: document.querySelector("#refreshBtn"),
+            messageText: document.querySelector("#messageText"),
+            linkText: document.querySelector("#linkText"),
+            disablePreview: document.querySelector("#disablePreview"),
+            sendTextBtn: document.querySelector("#sendTextBtn"),
+            mediaType: document.querySelector("#mediaType"),
+            mediaUrl: document.querySelector("#mediaUrl"),
+            mediaFile: document.querySelector("#mediaFile"),
+            captionText: document.querySelector("#captionText"),
+            captionWrap: document.querySelector("#captionWrap"),
+            sendMediaBtn: document.querySelector("#sendMediaBtn"),
+            log: document.querySelector("#log"),
+        };
+
+        const params = new URLSearchParams(window.location.search);
+        const apiFromUrl = params.get("api") || "";
+        els.consoleKey.value = localStorage.getItem("consoleKey") || "";
+        els.apiBase.value = apiFromUrl || localStorage.getItem("apiBase") || "";
+        els.chatId.value = localStorage.getItem("chatId") || "";
+        if (apiFromUrl) {
+            localStorage.setItem("apiBase", apiFromUrl);
+        }
+
+        function authHeaders() {
+            const key = els.consoleKey.value.trim();
+            return key ? { "X-Console-Key": key } : {};
+        }
+
+        function addLog(kind, message) {
+            const entry = document.createElement("div");
+            entry.className = `entry ${kind === "error" ? "error" : ""}`;
+            entry.innerHTML = `<strong>${kind === "error" ? "Error" : "Sent"}</strong> ${message}`;
+            els.log.prepend(entry);
+        }
+
+        function apiUrl(path) {
+            const base = els.apiBase.value.trim().replace(/\/+$/, "");
+            return base ? `${base}${path}` : path;
+        }
+
+        async function api(path, options = {}) {
+            const headers = { ...authHeaders(), ...(options.headers || {}) };
+            const response = await fetch(apiUrl(path), { ...options, headers });
+            const data = await response.json();
+            if (!response.ok || !data.ok) {
+                throw new Error(data.error || `Request failed: ${response.status}`);
+            }
+            return data;
+        }
+
+        function selectedChatId() {
+            const value = els.chatId.value.trim();
+            if (!value) {
+                throw new Error("Choose a chat or paste a channel ID first.");
+            }
+            localStorage.setItem("chatId", value);
+            return value;
+        }
+
+        function chatTitle(chat) {
+            const name = chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(" ") || chat.username || chat.id;
+            return chat.username ? `${name} (@${chat.username})` : name;
+        }
+
+        function renderChats(chats) {
+            els.chatList.innerHTML = "";
+            els.chatOptions.innerHTML = "";
+            els.chatCount.textContent = String(chats.length);
+
+            if (!chats.length) {
+                els.chatList.innerHTML = `<div class="muted">Use /chatid in Telegram, then paste that ID above.</div>`;
+                return;
+            }
+
+            chats.forEach((chat) => {
+                const option = document.createElement("option");
+                option.value = chat.id;
+                option.label = `${chatTitle(chat)} - ${chat.type}`;
+                els.chatOptions.append(option);
+
+                const button = document.createElement("button");
+                button.className = "chat-item";
+                button.type = "button";
+                button.innerHTML = `<strong>${chatTitle(chat)}</strong><span>${chat.type} | ${chat.id}</span>`;
+                button.addEventListener("click", () => {
+                    els.chatId.value = chat.id;
+                    localStorage.setItem("chatId", chat.id);
+                });
+                els.chatList.append(button);
+            });
+        }
+
+        async function loadStatus() {
+            try {
+                const data = await api("/api/status");
+                els.statusDot.classList.add("online");
+                els.statusText.textContent = "Online";
+                els.botName.textContent = data.bot.username ? `@${data.bot.username}` : data.bot.name;
+                if (!els.chatId.value.trim() && data.console && data.console.default_chat_id) {
+                    els.chatId.value = data.console.default_chat_id;
+                    localStorage.setItem("chatId", data.console.default_chat_id);
+                }
+            } catch (error) {
+                els.statusDot.classList.remove("online");
+                els.statusText.textContent = "Locked";
+                addLog("error", error.message);
+            }
+        }
+
+        async function loadChats() {
+            try {
+                const data = await api("/api/chats");
+                renderChats(data.chats || []);
+            } catch (error) {
+                addLog("error", error.message);
+            }
+        }
+
+        async function sendText() {
+            try {
+                const payload = {
+                    type: "message",
+                    chat_id: selectedChatId(),
+                    text: els.messageText.value,
+                    link: els.linkText.value,
+                    disable_preview: els.disablePreview.checked,
+                };
+                const data = await api("/api/send", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                addLog("ok", `message #${data.message_id}`);
+            } catch (error) {
+                addLog("error", error.message);
+            }
+        }
+
+        async function sendMedia() {
+            try {
+                const form = new FormData();
+                form.set("type", els.mediaType.value);
+                form.set("chat_id", selectedChatId());
+                form.set("url", els.mediaUrl.value.trim());
+                form.set("caption", els.captionText.value);
+                if (els.mediaFile.files[0]) {
+                    form.set("file", els.mediaFile.files[0]);
+                }
+                const data = await api("/api/send", { method: "POST", body: form });
+                addLog("ok", `${els.mediaType.value} #${data.message_id}`);
+            } catch (error) {
+                addLog("error", error.message);
+            }
+        }
+
+        document.querySelectorAll("[data-emoji]").forEach((button) => {
+            button.addEventListener("click", () => {
+                els.messageText.setRangeText(button.dataset.emoji, els.messageText.selectionStart, els.messageText.selectionEnd, "end");
+                els.messageText.focus();
+            });
+        });
+
+        document.querySelectorAll("[data-template]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const prefix = els.messageText.value.trim() ? "\n" : "";
+                els.messageText.value += `${prefix}${button.dataset.template}`;
+                els.messageText.focus();
+            });
+        });
+
+        els.mediaType.addEventListener("change", () => {
+            els.captionWrap.classList.toggle("hidden", els.mediaType.value === "sticker");
+        });
+
+        els.consoleKey.addEventListener("input", () => {
+            localStorage.setItem("consoleKey", els.consoleKey.value);
+        });
+
+        els.apiBase.addEventListener("input", () => {
+            localStorage.setItem("apiBase", els.apiBase.value.trim());
+        });
+
+        els.refreshBtn.addEventListener("click", () => {
+            loadStatus();
+            loadChats();
+        });
+        els.sendTextBtn.addEventListener("click", sendText);
+        els.sendMediaBtn.addEventListener("click", sendMedia);
+
+        loadStatus();
+        loadChats();
+    </script>
+</body>
+</html>
