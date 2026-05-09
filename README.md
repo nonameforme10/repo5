@@ -2,6 +2,11 @@
 
 Telegram bot plus browser control console for sending text, links, emoji, GIFs, files, videos, photos, audio, voice messages, and stickers to chats where the bot has permission.
 
+Admins can also use Telegram itself as the console: send any message, GIF, file,
+sticker, video, or photo to the bot in a private DM and the bot copies it to
+`TARGET_CHAT_ID`. Non-admin private messages get three short replies, then the
+bot stops responding to that user.
+
 ## Local Run
 
 ```powershell

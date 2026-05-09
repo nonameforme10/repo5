@@ -4,12 +4,12 @@ import asyncio
 import logging
 import sys
 
-from aiogram import Bot, Dispatcher, F, Router
+from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from aiogram.enums import ChatType, ParseMode
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BotCommand, BotCommandScopeChat, Message
+from aiogram.types import BotCommandScopeChat, Message
 
 from bot.chat_store import ChatStore, ChatTrackingMiddleware
 from bot.config import Config, ROOT_DIR, load_config
@@ -19,16 +19,12 @@ from bot.console_server import start_console_server
 router = Router(name="control")
 
 
-PUBLIC_COMMANDS = [
-    BotCommand(command="start", description="Show bot help"),
-    BotCommand(command="chatid", description="Show this chat ID"),
+STRANGER_REPLIES = [
+    "Huh? why are you here, get outta here, i only speak with reality",
+    "i said get outta here",
+    "i dont speak",
 ]
-
-
-ADMIN_COMMANDS = [
-    BotCommand(command="console", description="Show the browser console address"),
-    BotCommand(command="say", description="Make the bot say text in this chat"),
-]
+stranger_counts: dict[int, int] = {}
 
 
 def user_id(message: Message) -> int | None:
@@ -45,36 +41,71 @@ def chat_label(message: Message) -> str:
 
 async def set_commands(bot: Bot, config: Config) -> None:
     await bot.delete_my_commands()
-    await bot.set_my_commands(PUBLIC_COMMANDS)
-
     for admin_id in config.admin_ids:
         try:
-            await bot.set_my_commands([*PUBLIC_COMMANDS, *ADMIN_COMMANDS], scope=BotCommandScopeChat(chat_id=admin_id))
+            await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=admin_id))
         except TelegramAPIError as exc:
-            logging.warning("Could not set private admin commands for %s: %s", admin_id, exc)
+            logging.warning("Could not clear private admin commands for %s: %s", admin_id, exc)
+
+
+def parse_target_chat_id(config: Config) -> int | str | None:
+    target = config.default_chat_id.strip()
+    if not target:
+        return None
+
+    try:
+        return int(target)
+    except ValueError:
+        return target
+
+
+async def send_stranger_reply(message: Message) -> None:
+    sender_id = user_id(message)
+    if sender_id is None:
+        return
+
+    count = stranger_counts.get(sender_id, 0)
+    if count >= len(STRANGER_REPLIES):
+        return
+
+    stranger_counts[sender_id] = count + 1
+    await message.answer(STRANGER_REPLIES[count])
+
+
+async def copy_to_target(message: Message, bot: Bot, config: Config) -> None:
+    target_chat_id = parse_target_chat_id(config)
+    if target_chat_id is None:
+        await message.answer("TARGET_CHAT_ID is not set on the server.")
+        return
+
+    try:
+        sent = await bot.copy_message(
+            chat_id=target_chat_id,
+            from_chat_id=message.chat.id,
+            message_id=message.message_id,
+        )
+        await message.answer(f"sent #{sent.message_id}")
+    except TelegramAPIError as exc:
+        await message.answer(f"could not send: {exc}")
 
 
 @router.message(CommandStart())
 async def start(message: Message, config: Config) -> None:
-    admin_line = ""
     if is_admin(message, config):
-        admin_line = (
-            "\n\nAdmin commands:"
-            "\n/console - show browser console URL"
-            "\n/say your text - send a message as the bot"
-        )
+        await message.answer("admin mode. send anything here and i will post it to the target chat.")
+        return
 
-    await message.answer(
-        "Bot is online.\n\n"
-        "Use /chatid inside a group, channel discussion, or DM to get the target chat ID. "
-        "Open the browser console to send text, links, emoji, GIFs, files, videos, and more."
-        f"{admin_line}"
-    )
+    await send_stranger_reply(message)
 
 
 @router.message(Command("chatid"))
 @router.channel_post(Command("chatid"))
-async def chatid(message: Message) -> None:
+async def chatid(message: Message, config: Config) -> None:
+    if message.chat.type != ChatType.CHANNEL and not is_admin(message, config):
+        if message.chat.type == ChatType.PRIVATE:
+            await send_stranger_reply(message)
+        return
+
     username = f"\nUsername: @{message.chat.username}" if message.chat.username else ""
     await message.answer(
         f"Chat: {chat_label(message)}\n"
@@ -84,42 +115,16 @@ async def chatid(message: Message) -> None:
     )
 
 
-@router.message(Command("console"))
-async def console(message: Message, config: Config) -> None:
-    if not is_admin(message, config):
-        await message.answer("Only configured admins can use this command.")
+@router.message()
+async def handle_message(message: Message, bot: Bot, config: Config) -> None:
+    if message.chat.type != ChatType.PRIVATE:
         return
 
-    key_note = "\nConsole key is required." if config.console_api_key else ""
-    await message.answer(f"Browser console: {config.console_url}{key_note}")
-
-
-@router.message(Command("say"))
-async def say(message: Message, bot: Bot, config: Config) -> None:
-    if not is_admin(message, config):
-        await message.answer("Only configured admins can use /say.")
+    if is_admin(message, config):
+        await copy_to_target(message, bot, config)
         return
 
-    parts = (message.text or "").split(maxsplit=1)
-    if len(parts) < 2 or not parts[1].strip():
-        await message.answer("Usage: /say your message")
-        return
-
-    await bot.send_message(chat_id=message.chat.id, text=parts[1].strip(), parse_mode=None)
-
-
-@router.message(F.text)
-async def mention_reply(message: Message, bot: Bot) -> None:
-    if not message.text:
-        return
-
-    me = await bot.get_me()
-    username = f"@{me.username}".lower() if me.username else ""
-    is_mentioned = bool(username and username in message.text.lower())
-    is_reply_to_bot = bool(message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == me.id)
-
-    if is_mentioned or is_reply_to_bot:
-        await message.reply("I am here. My owner can speak through me from the console.")
+    await send_stranger_reply(message)
 
 
 async def run(config: Config) -> None:
