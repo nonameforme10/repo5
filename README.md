@@ -6,7 +6,7 @@ Telegram bot plus browser control console for sending text, links, emoji, GIFs, 
 
 ```powershell
 python -m pip install -r .\bot\requirements.txt
-Copy-Item .env.example .env
+Copy-Item .env.template .env
 python -m bot.main
 ```
 
@@ -64,7 +64,7 @@ cd /opt/telegram-console-bot
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r bot/requirements.txt
-cp .env.example .env
+cp .env.template .env
 nano .env
 mkdir -p data
 sudo chown -R telegrambot:telegrambot /opt/telegram-console-bot
