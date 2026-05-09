@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from urllib.parse import urlparse
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
@@ -14,6 +15,7 @@ from aiogram.types import BotCommandScopeChat, Message
 from bot.chat_store import ChatStore, ChatTrackingMiddleware
 from bot.config import Config, ROOT_DIR, load_config
 from bot.console_server import start_console_server
+from bot.target_store import TargetStore
 
 
 router = Router(name="control")
@@ -48,15 +50,25 @@ async def set_commands(bot: Bot, config: Config) -> None:
             logging.warning("Could not clear private admin commands for %s: %s", admin_id, exc)
 
 
-def parse_target_chat_id(config: Config) -> int | str | None:
-    target = config.default_chat_id.strip()
+def normalize_chat_id(value: str) -> int | str | None:
+    target = value.strip()
     if not target:
+        return None
+
+    if "t.me/+" in target or "t.me/joinchat/" in target:
+        return None
+
+    if target.startswith(("https://t.me/", "http://t.me/", "t.me/")):
+        parsed = urlparse(target if target.startswith(("http://", "https://")) else f"https://{target}")
+        username = parsed.path.strip("/").split("/", 1)[0]
+        if username:
+            return f"@{username.lstrip('@')}"
         return None
 
     try:
         return int(target)
     except ValueError:
-        return target
+        return target if target.startswith("@") else None
 
 
 async def send_stranger_reply(message: Message) -> None:
@@ -72,10 +84,50 @@ async def send_stranger_reply(message: Message) -> None:
     await message.answer(STRANGER_REPLIES[count])
 
 
-async def copy_to_target(message: Message, bot: Bot, config: Config) -> None:
-    target_chat_id = parse_target_chat_id(config)
+def forwarded_chat_id(message: Message) -> int | str | None:
+    origin = getattr(message, "forward_origin", None)
+    origin_chat = getattr(origin, "chat", None)
+    if origin_chat is not None:
+        return getattr(origin_chat, "id", None)
+
+    old_forward_chat = getattr(message, "forward_from_chat", None)
+    if old_forward_chat is not None:
+        return getattr(old_forward_chat, "id", None)
+
+    return None
+
+
+async def maybe_set_target(message: Message, target_store: TargetStore) -> bool:
+    chat_id = forwarded_chat_id(message)
+    if chat_id is not None:
+        saved = target_store.set(chat_id)
+        await message.answer(f"target saved: {saved}")
+        return True
+
+    text = (message.text or "").strip()
+    if not text:
+        return False
+
+    if "t.me/+" in text or "t.me/joinchat/" in text:
+        await message.answer("private invite links cannot be used. send the -100... chat id or forward a post from the target channel.")
+        return True
+
+    normalized = normalize_chat_id(text)
+    if normalized is None:
+        return False
+
+    if isinstance(normalized, int) or str(normalized).startswith("@"):
+        saved = target_store.set(normalized)
+        await message.answer(f"target saved: {saved}")
+        return True
+
+    return False
+
+
+async def copy_to_target(message: Message, bot: Bot, target_store: TargetStore) -> None:
+    target_chat_id = normalize_chat_id(target_store.get())
     if target_chat_id is None:
-        await message.answer("TARGET_CHAT_ID is not set on the server.")
+        await message.answer("target chat is not set. send me the -100... chat id once, or forward a post from the target channel.")
         return
 
     try:
@@ -86,7 +138,11 @@ async def copy_to_target(message: Message, bot: Bot, config: Config) -> None:
         )
         await message.answer(f"sent #{sent.message_id}")
     except TelegramAPIError as exc:
-        await message.answer(f"could not send: {exc}")
+        await message.answer(
+            f"could not send: {exc}\n\n"
+            "Fix: add the bot to the target chat/channel, make it admin if it is a channel, "
+            "then send me the real -100... chat id again."
+        )
 
 
 @router.message(CommandStart())
@@ -116,12 +172,15 @@ async def chatid(message: Message, config: Config) -> None:
 
 
 @router.message()
-async def handle_message(message: Message, bot: Bot, config: Config) -> None:
+async def handle_message(message: Message, bot: Bot, config: Config, target_store: TargetStore) -> None:
     if message.chat.type != ChatType.PRIVATE:
         return
 
     if is_admin(message, config):
-        await copy_to_target(message, bot, config)
+        if await maybe_set_target(message, target_store):
+            return
+
+        await copy_to_target(message, bot, target_store)
         return
 
     await send_stranger_reply(message)
@@ -136,6 +195,7 @@ async def run(config: Config) -> None:
     )
     dispatcher = Dispatcher()
     chat_store = ChatStore(ROOT_DIR / "data" / "bot-chats.json")
+    target_store = TargetStore(ROOT_DIR / "data" / "target-chat.json", fallback_chat_id=config.default_chat_id)
     console_runner = None
 
     dispatcher.message.middleware(ChatTrackingMiddleware(chat_store))
@@ -153,6 +213,7 @@ async def run(config: Config) -> None:
             bot,
             allowed_updates=dispatcher.resolve_used_update_types(),
             config=config,
+            target_store=target_store,
         )
     finally:
         if console_runner:
