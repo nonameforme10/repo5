@@ -15,17 +15,13 @@ from aiogram.types import BotCommandScopeChat, Message
 from bot.chat_store import ChatStore, ChatTrackingMiddleware
 from bot.config import Config, ROOT_DIR, load_config
 from bot.console_server import start_console_server
+from bot.reply_store import ReplyStore
 from bot.target_store import TargetStore
 
 
 router = Router(name="control")
 
 
-STRANGER_REPLIES = [
-    "Huh? why are you here, get outta here, i only speak with reality",
-    "i said get outta here",
-    "i dont speak",
-]
 stranger_counts: dict[int, int] = {}
 
 
@@ -71,17 +67,18 @@ def normalize_chat_id(value: str) -> int | str | None:
         return target if target.startswith("@") else None
 
 
-async def send_stranger_reply(message: Message) -> None:
+async def send_stranger_reply(message: Message, reply_store: ReplyStore) -> None:
     sender_id = user_id(message)
     if sender_id is None:
         return
 
     count = stranger_counts.get(sender_id, 0)
-    if count >= len(STRANGER_REPLIES):
+    reply = reply_store.reply_for_count(count)
+    if reply is None:
         return
 
     stranger_counts[sender_id] = count + 1
-    await message.answer(STRANGER_REPLIES[count])
+    await message.answer(reply)
 
 
 def forwarded_chat_id(message: Message) -> int | str | None:
@@ -146,20 +143,20 @@ async def copy_to_target(message: Message, bot: Bot, target_store: TargetStore) 
 
 
 @router.message(CommandStart())
-async def start(message: Message, config: Config) -> None:
+async def start(message: Message, config: Config, reply_store: ReplyStore) -> None:
     if is_admin(message, config):
         await message.answer("admin mode. send anything here and i will post it to the target chat.")
         return
 
-    await send_stranger_reply(message)
+    await send_stranger_reply(message, reply_store)
 
 
 @router.message(Command("chatid"))
 @router.channel_post(Command("chatid"))
-async def chatid(message: Message, config: Config) -> None:
+async def chatid(message: Message, config: Config, reply_store: ReplyStore) -> None:
     if message.chat.type != ChatType.CHANNEL and not is_admin(message, config):
         if message.chat.type == ChatType.PRIVATE:
-            await send_stranger_reply(message)
+            await send_stranger_reply(message, reply_store)
         return
 
     username = f"\nUsername: @{message.chat.username}" if message.chat.username else ""
@@ -172,7 +169,13 @@ async def chatid(message: Message, config: Config) -> None:
 
 
 @router.message()
-async def handle_message(message: Message, bot: Bot, config: Config, target_store: TargetStore) -> None:
+async def handle_message(
+    message: Message,
+    bot: Bot,
+    config: Config,
+    target_store: TargetStore,
+    reply_store: ReplyStore,
+) -> None:
     if message.chat.type != ChatType.PRIVATE:
         return
 
@@ -183,7 +186,7 @@ async def handle_message(message: Message, bot: Bot, config: Config, target_stor
         await copy_to_target(message, bot, target_store)
         return
 
-    await send_stranger_reply(message)
+    await send_stranger_reply(message, reply_store)
 
 
 async def run(config: Config) -> None:
@@ -196,6 +199,7 @@ async def run(config: Config) -> None:
     dispatcher = Dispatcher()
     chat_store = ChatStore(ROOT_DIR / "data" / "bot-chats.json")
     target_store = TargetStore(ROOT_DIR / "data" / "target-chat.json", fallback_chat_id=config.default_chat_id)
+    reply_store = ReplyStore(ROOT_DIR / "bot" / "ragebaits.json")
     console_runner = None
 
     dispatcher.message.middleware(ChatTrackingMiddleware(chat_store))
@@ -214,6 +218,7 @@ async def run(config: Config) -> None:
             allowed_updates=dispatcher.resolve_used_update_types(),
             config=config,
             target_store=target_store,
+            reply_store=reply_store,
         )
     finally:
         if console_runner:
